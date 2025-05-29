@@ -1,0 +1,75 @@
+# Paso 1: Instalar librerías necesarias
+!pip install transformers datasets accelerate
+
+# Paso 2: Autenticarse en Hugging Face
+from huggingface_hub import login
+
+# Inserta tu token (aquí puedes automatizarlo o usarlo con input)
+login("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")
+
+# Paso 3: Cargar ejemplos de entrenamiento (usa tu CSV cargado desde Drive o directamente aquí)
+import pandas as pd
+
+# Supongamos que has subido el archivo a Colab (p.ej., desde la carpeta Colab Notebooks)
+data_path = "/content/drive/MyDrive/Colab Notebooks/datos.csv"
+
+df = pd.read_csv(data_path)
+
+# Asegúrate que las columnas sean 'pregunta' y 'respuesta'
+df = df.rename(columns=lambda x: x.lower())
+assert 'pregunta' in df.columns and 'respuesta' in df.columns, "El CSV debe tener columnas 'pregunta' y 'respuesta'"
+
+# Paso 4: Preparar dataset para fine-tuning tipo QA/chat
+from datasets import Dataset
+
+dataset = Dataset.from_pandas(df[['pregunta', 'respuesta']])
+
+# Paso 5: Convertir a formato de entrenamiento tipo diálogo
+def format_chat(example):
+    return {
+        "text": f"Usuario: {example['pregunta']}\nAsistente: {example['respuesta']}"
+    }
+
+dataset = dataset.map(format_chat)
+
+def tokenize_function(example):
+    tokenized = tokenizer(example["text"], truncation=True, padding="max_length", max_length=128)
+    tokenized["labels"] = tokenized["input_ids"].copy()
+    return tokenized
+
+tokenized_dataset = dataset.map(tokenize_function, batched=True)
+
+training_args = TrainingArguments(
+    output_dir="./chatbot_model",
+    num_train_epochs=3,
+    per_device_train_batch_size=2,
+    save_steps=100,
+    logging_steps=10,
+    save_total_limit=2,
+    push_to_hub=True,
+    hub_model_id="TU_NOMBRE_DE_USUARIO/chatbot-ejemplo",
+    remove_unused_columns=False,  # opcional, previene errores
+)
+
+
+# Paso 8: Guardar el modelo en Hugging Face (opcional)
+trainer.push_to_hub()
+
+# Paso 9: Interacción de prueba
+def responder(pregunta):
+    entrada = f"Usuario: {pregunta}\nAsistente:"
+    inputs = tokenizer(entrada, return_tensors="pt")
+    outputs = model.generate(
+        **inputs,
+        max_length=150,
+        do_sample=True,
+        top_k=50,
+        top_p=0.95,
+        temperature=0.7,
+        pad_token_id=tokenizer.eos_token_id
+    )
+    respuesta = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    print(respuesta.split("Asistente:")[-1].strip())
+
+# Prueba rápida
+responder("¿Qué tal estás hoy?")
